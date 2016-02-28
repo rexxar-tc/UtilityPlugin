@@ -17,10 +17,10 @@ namespace UtilityPlugin
     {
         #region Private Fields
 
-        private int _example;
+        private float _grindMultiplier;
+        private float _weldmultiplier;
         private string _serverChatName;
-        private MTObservableCollection<SettingsDialogItem> _exampleMTO;
-        
+
         private static PluginSettings _instance;
         private static bool _loading = false;
 
@@ -52,29 +52,28 @@ namespace UtilityPlugin
             }
         }
 
-        public int Example
+        public float GrindMultiplier
         {
             get
             {
-                return _example;
+                return _grindMultiplier;
+                
             }
             set
             {
-                _example = value;
-                Save( );
+                _grindMultiplier = value;
             }
         }
 
-        public MTObservableCollection<SettingsDialogItem> ExampleMTO
+        public float WeldMultiplier
         {
             get
             {
-                return _exampleMTO;
+                return _weldmultiplier;
             }
             set
             {
-                _exampleMTO = value;
-                Save( );
+                _weldmultiplier = value;
             }
         }
         #endregion
@@ -84,10 +83,9 @@ namespace UtilityPlugin
         #region Constructor
         public PluginSettings( )
         {
-            _exampleMTO = new MTObservableCollection<SettingsDialogItem>( );
-            _exampleMTO.CollectionChanged += ItemsCollectionChanged;
-            _example = 100;
-            _serverChatName = "Example";
+            _grindMultiplier = 0.5f;
+            _weldmultiplier = 0.5f;
+            _serverChatName = "Server";
         }
 
 

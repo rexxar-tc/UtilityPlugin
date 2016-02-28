@@ -68,36 +68,33 @@
                 PluginSettings.Instance.ServerChatName = value;
             }
         }
-        
-        [Category( "Dialog Example" )]
-        [Description( "Shows a dialog window" )]
-        [Browsable( true )]
-        [ReadOnly( false )]
-        public MTObservableCollection<SettingsDialogItem> Dialog
+
+        [Category("Shipyards")]
+        [Description("Multiplies the shipyard grinder speed. Can be less than 1")]
+        [Browsable(true)]
+        [ReadOnly(false)]
+        public float GrindMultiplier
         {
             get
             {
-                return PluginSettings.Instance.ExampleMTO;
-            }
-            set
-            {
-                PluginSettings.Instance.ExampleMTO = value;
-            }
+                return PluginSettings.Instance.GrindMultiplier;
+             }
+            set { PluginSettings.Instance.GrindMultiplier = value; }
         }
 
-        [Category( "Example field" )]
-        [Description( "this is an int" )]
+        [Category( "Shipyards" )]
+        [Description( "Multiplies the shipyard welder speed. Can be less than 1" )]
         [Browsable( true )]
         [ReadOnly( false )]
-        public int Example
+        public float WeldMultiplier
         {
             get
             {
-                return PluginSettings.Instance.Example;
+                return PluginSettings.Instance.WeldMultiplier;
             }
             set
             {
-                PluginSettings.Instance.Example = value;
+                PluginSettings.Instance.WeldMultiplier = value;
             }
         }
         #endregion
@@ -132,7 +129,9 @@
             // Setup process handlers
             _processHandlers = new List<ProcessHandlerBase>
             {
-                new ProcessWeldHandler()
+                new ProcessWeldHandler(),
+                //new ProcessGrindHandler(),
+                new ProcessShipyardHandler()
             };
 
             // Setup chat handlers
@@ -585,7 +584,7 @@
         {
             get
             {
-                return "Plugin";
+                return "UtilityPlugin";
             }
         }
 

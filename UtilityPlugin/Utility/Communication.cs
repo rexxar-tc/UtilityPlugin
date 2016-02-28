@@ -4,6 +4,7 @@ using NLog;
 using Sandbox.Common;
 using Sandbox.ModAPI;
 using SEModAPIExtensions.API;
+using VRage.Game;
 using VRageMath;
 
 namespace UtilityPlugin.Utility

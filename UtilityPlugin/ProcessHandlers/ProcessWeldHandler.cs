@@ -1,26 +1,31 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
+using Sandbox.Common.ObjectBuilders;
+using Sandbox.Definitions;
+using Sandbox.Game;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Entities.Cube;
+using Sandbox.Game.GameSystems;
+using Sandbox.Game.GameSystems.Conveyors;
 using Sandbox.ModAPI;
+using Sandbox.ModAPI.Ingame;
 using SEModAPIExtensions.API;
 using UtilityPlugin.Utility;
-using VRage.Game.Entity;
-using VRage.Library.Collections;
+using VRage.Game;
 using VRage.ModAPI;
 using VRageMath;
+using IMyCubeBlock = Sandbox.ModAPI.IMyCubeBlock;
+using IMyCubeGrid = Sandbox.ModAPI.IMyCubeGrid;
+using IMyInventory = Sandbox.ModAPI.IMyInventory;
+using IMyShipWelder = Sandbox.ModAPI.IMyShipWelder;
+using IMySlimBlock = Sandbox.ModAPI.IMySlimBlock;
+using IMyTerminalBlock = Sandbox.ModAPI.IMyTerminalBlock;
 
 namespace UtilityPlugin.ProcessHandlers
 {
     public class ProcessWeldHandler : ProcessHandlerBase
     {
-
-        private static List<BoundingBoxD> shipyards = new List<BoundingBoxD>( );
         public override int GetUpdateResolution( )
         {
             return 1000;
@@ -28,134 +33,197 @@ namespace UtilityPlugin.ProcessHandlers
 
         public override void Handle( )
         {
-            UpdateShipyards( );
-            if (!shipyards.Any())
+            if ( !ProcessShipyardHandler.ShipyardsList.Any( ) )
                 return;
 
-            foreach ( BoundingBoxD shipyard in shipyards )
+            foreach ( ShipyardItem item in ProcessShipyardHandler.ShipyardsList )
             {
-                
-                List<IMyEntity> entities = new List<IMyEntity>( );
-                
-                BoundingBoxD thisShipyard = new BoundingBoxD( shipyard.Min, shipyard.Max );
-                
-                Wrapper.GameAction( ( ) =>
-                 {
-                     entities = MyAPIGateway.Entities.GetElementsInBox( ref thisShipyard );
-                 } );
-                if ( !entities.Any( ) )
+                // if (!item.Enabled)
+                //      continue;
+
+                if ( item.YardType != ShipyardItem.ShipyardType.Weld )
                     continue;
 
-                foreach ( IMyEntity entity in entities )
+                //we finished the grid and the entity was deleted
+                if ( item.Grid == null && !item.SplitGrids.Any( ) )
+                    item.Clear( );
+                //if we have any split grids in the queue, load up the next one
+                else if ( item.Grid == null && item.SplitGrids.Any( ) )
+                    item.Grid = item.SplitGrids.First( );
+
+                UtilityPlugin.Log.Info( "2" );
+                if ( !item.HasGrid )
                 {
-                    var grid = entity as MyCubeGrid;
-                    if (grid == null)
+                    //List<IMyEntity> entities = new List<IMyEntity>();
+                    HashSet<IMyEntity> entities = new HashSet<IMyEntity>( );
+                    //we can't get entities in a oriented bounding box, so create a sphere around the whole thing
+                    //this is just to find entities in the general area, we check later against the box
+                    BoundingSphereD entitySphere = new BoundingSphereD( item.ShipyardBox.Center, item.ShipyardBox.HalfExtent.Max( ) );
+
+                    Wrapper.GameAction( ( ) =>
+                     {
+                        //entities = MyAPIGateway.Entities.GetEntitiesInSphere(ref entitySphere);
+                        MyAPIGateway.Entities.GetEntities( entities );
+                     } );
+                    UtilityPlugin.Log.Info( "3" );
+                    if ( !entities.Any( ) )
                         continue;
 
-                    if (shipyard.Contains(new BoundingBoxD(grid.GridIntegerToWorld(grid.Min), grid.GridIntegerToWorld(grid.Max))) == ContainmentType.Contains)
+
+                    foreach ( IMyEntity entity in entities )
                     {
-                        //don't allow ships to be welded if they're moving
-                       if (grid.Physics.LinearVelocity == Vector3D.Zero
-                           && grid.Physics.AngularVelocity == Vector3D.Zero
-                           && !grid.Physics.IsStatic)
-                       {
-                            //Communication.SendPublicInformation("Welding ship");
-                            //we're allowed to weld this ship
-                            if (!StepWeld(grid))
+                        var grid = entity as MyCubeGrid;
+                        if ( grid == null )
+                            continue;
+
+                        if ( grid.Physics.IsStatic )
+                            continue;
+
+                        if ( item.HasGrid && item.Grid == grid )
+                        {
+                            //TODO: alert the player
+                            //there's multiple grids inside the shipyard before grind start
+                            //item.HasGrid = false;
+                            //break;
+                        }
+                        UtilityPlugin.Log.Info( "4" );
+                        MyOrientedBoundingBoxD? testBox = MathUtility.CreateOrientedBoundingBox( grid );
+                        if ( !testBox.HasValue )
+                            continue;
+                        MyOrientedBoundingBoxD gridBox = testBox.Value;
+                        UtilityPlugin.Log.Info( "5" );
+                        UtilityPlugin.Log.Info( item.ShipyardBox.Center.ToString );
+                        UtilityPlugin.Log.Info( gridBox.Center.ToString );
+                        UtilityPlugin.Log.Info( item.ShipyardBox.Contains( ref gridBox ).ToString );
+                        if (
+                            item.ShipyardBox.Contains( ref gridBox ) == ContainmentType.Disjoint )
+                        {
+                            //don't allow ships to be welded if they're moving
+                            if ( grid.Physics.LinearVelocity == Vector3D.Zero
+                             && grid.Physics.AngularVelocity == Vector3D.Zero )
                             {
-                                //Communication.SendPublicInformation("Ship is finished");
-                                //welding is done, notify the player
+                                UtilityPlugin.Log.Info( "20" );
+                                item.HasGrid = true;
+                                item.Grid = grid;
+                                item.GridBox = gridBox;
                             }
                         }
                     }
                 }
+                UtilityPlugin.Log.Info( "6" );
+                if ( item.HasGrid )
+                    StepWeld( item );
             }
-            base.Handle();
+            base.Handle( );
         }
 
-        private void UpdateShipyards( )
+        private static bool StepWeld( ShipyardItem shipyardItem )
         {
-            //clear the shipyards so we don't have to bother checking for yards to remove
-            if(shipyards.Any())
-            shipyards.Clear();
+            Dictionary<string, int> missingComponents = new Dictionary<string, int>( );
+            UtilityPlugin.Log.Info( "7" );
+            Random random = new Random( );
+            float grindAmount = Server.Instance.Config.GrinderSpeedMultiplier * PluginSettings.Instance.GrindMultiplier;
+            //shorten this to grid for convenience
+            MyCubeGrid grid = shipyardItem.Grid;
+            if ( grid == null )
+                return false;
 
-            HashSet<IMyEntity> entities = new HashSet<IMyEntity>( );
-            Wrapper.GameAction( ( ) =>
-             {
-                 MyAPIGateway.Entities.GetEntities( entities, x => x is IMyCubeGrid );
-             } );
-
-            foreach (IMyEntity entity in entities)
+            //this is awful but I'll fix it later. probably
+            HashSet<MySlimBlock> weldBlocks = new HashSet<MySlimBlock>();
+            foreach (MySlimBlock block in grid.CubeBlocks)
             {
-                List<IMyCubeBlock> welders = new List<IMyCubeBlock>();
+                if (!block.IsFullIntegrity)
+                    weldBlocks.Add(block);
+            }
 
-                if (entity.Physics == null || !entity.Physics.IsStatic)
-                    continue;
-
-                if (!(entity is IMyCubeGrid))
-                    return;
-
-                List<IMySlimBlock> gridBlocks = new List<IMySlimBlock>();
-                ((IMyCubeGrid) entity).GetBlocks(gridBlocks);
-
-                foreach (IMySlimBlock slimBlock in gridBlocks)
+            foreach (IMyCubeBlock welder in shipyardItem.Tools)
+            {
+                if (!shipyardItem.ProcessBlocks.ContainsKey(welder.EntityId))
                 {
-                    if (slimBlock == null)
-                        continue;
-                    
-                    if (slimBlock.FatBlock == null)
-                        continue;
-                    
-                    if (!(slimBlock.FatBlock is IMyShipWelder))
-                        continue;
-                    
-                    if (((IMyTerminalBlock)slimBlock.FatBlock).CustomName.ToLower().Contains("shipyard"))
+                    MySlimBlock nextBlock = null;
+                    UtilityPlugin.Log.Info( "19" );
+                    int tryCount = 0;
+
+
+                    while ( tryCount < 20 )
                     {
-                            welders.Add(slimBlock.FatBlock);
+                        UtilityPlugin.Log.Info( "9" );
+                        //limit the number of tries so we don't get stuck in a loop forever
+                        tryCount++;
+                        UtilityPlugin.Log.Info( "30" );
+                        //pick a random block. we don't really care if two welders hit the same block, so don't check
+
+                        if ( weldBlocks.Count > 1 )
+                            nextBlock = weldBlocks.ElementAt( random.Next( 0, weldBlocks.Count - 1 ) );
+                        else
+                            nextBlock = weldBlocks.FirstElement( );
+
+                        if ( nextBlock == null )
+                            continue;
+
+                        if (nextBlock.IsFullIntegrity)
+                            continue;
+
+                        if ( shipyardItem.ProcessBlocks.ContainsValue( nextBlock ) )
+                            continue;
+
+                        break;
                     }
-                }
 
-                if (welders.Any() && welders.Count != 8)
-                    continue;
-                
-                List<Vector3D> points = new List<Vector3D>();
-                List<Vector3I> gridPoints = new List<Vector3I>();
-                foreach (IMyCubeBlock welder in welders)
-                {
-                    gridPoints.Add(welder.Position);
-                    points.Add(welder.PositionComp.GetPosition());
-                }
-
-                if (MathUtility.ArePointsOrthogonal(gridPoints))
-                {
-                    shipyards.Add(BoundingBoxD.CreateFromPoints(points));
-                    //Communication.SendPublicInformation("Found shipyard");
+                    //we weren't able to find a suitable block somehow, so skip this welder for now
+                    if ( nextBlock == null )
+                        continue;
+                    UtilityPlugin.Log.Info( "10" );
+                    //we found a block to pair with our welder, add it to the dictionary and carry on with destruction
+                    shipyardItem.ProcessBlocks.Add( welder.EntityId, nextBlock );
                 }
             }
-        }
-
-        private static bool StepWeld( MyCubeGrid grid )
-        {
-            int blockCount = 0;
-            foreach ( MySlimBlock block in grid.CubeBlocks )
+            Wrapper.GameAction(() =>
             {
-                if (block == null)
-                    continue;
-                
-                block.FillConstructionStockpile();
-                if ( !block.IsFullIntegrity || block.HasDeformation )
+                foreach (IMyCubeBlock welderBlock in shipyardItem.Tools)
                 {
-                    Wrapper.GameAction(() =>
+                    UtilityPlugin.Log.Info("12");
+                    IMyShipWelder welder = (IMyShipWelder) welderBlock;
+                    MyInventory welderInventory = (MyInventory) welder.GetInventory(0);
+                    MySlimBlock block;
+                    shipyardItem.ProcessBlocks.TryGetValue(welderBlock.EntityId, out block);
+                    if (block == null)
+                        continue;
+
+                    if (block.IsFullIntegrity)
                     {
-                        block.IncreaseMountLevel(1f, 0, null, 1f, true);
-                    });
-                        blockCount++;
+                        shipyardItem.ProcessBlocks.Remove(welderBlock.EntityId);
+                        continue;
+                    }
+
+                    block.GetMissingComponents(missingComponents);
+
+                    foreach (var component in missingComponents)
+                    {
+                        var componentId = new MyDefinitionId(typeof (MyObjectBuilder_Component), component.Key);
+                        int amount = Math.Max(component.Value - (int) welderInventory.GetItemAmount(componentId), 0);
+                        if (amount == 0)
+                            continue;
+
+                        if (welder.UseConveyorSystem)
+                            MyGridConveyorSystem.ItemPullRequest((IMyConveyorEndpointBlock) welder, welderInventory,
+                                welder.OwnerId, componentId, component.Value);
+                    }
+
+                    float weldAmount = PluginSettings.Instance.WeldMultiplier*
+                                       Server.Instance.Config.WelderSpeedMultiplier;
+
+                    if (block.CanContinueBuild((MyInventory) welder.GetInventory(0)))
+                    {
+                        block.MoveItemsToConstructionStockpile((MyInventory) welder.GetInventory(0));
+                        block.IncreaseMountLevel(weldAmount, 0, null, 1f, true);
+
+                    }
+
                 }
-                if (blockCount == 8)
-                    return true;
-            }
-            if (blockCount > 0)
-                return true;
+            });
+
+            //THREADING!!!
 
             return false;
         }

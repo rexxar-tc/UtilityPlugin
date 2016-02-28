@@ -70,6 +70,8 @@
       <DependentUpon>AssemblyFileVersion.tt</DependentUpon>
     </Compile>
     <Compile Include="ChatHandlers\ChatHandlerBase.cs" />
+    <Compile Include="ProcessHandlers\ProcessShipyardHandler.cs" />
+    <Compile Include="ProcessHandlers\ProcessGrindHandler.cs" />
     <Compile Include="ProcessHandlers\ProcessWeldHandler.cs" />
     <Compile Include="UtilityPlugin.cs" />
     <Compile Include="ProcessHandlers\ProcessHandlerBase.cs" />
