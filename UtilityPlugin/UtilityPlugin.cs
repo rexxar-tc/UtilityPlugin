@@ -130,8 +130,8 @@
             _processHandlers = new List<ProcessHandlerBase>
             {
                 new ProcessWeldHandler(),
-                //new ProcessGrindHandler(),
-                new ProcessShipyardHandler()
+                new ProcessGrindHandler(),
+                new ProcessShipyardHandler(),
             };
 
             // Setup chat handlers

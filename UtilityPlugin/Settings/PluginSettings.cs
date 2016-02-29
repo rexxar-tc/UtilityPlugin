@@ -62,6 +62,7 @@ namespace UtilityPlugin
             set
             {
                 _grindMultiplier = value;
+                Save();
             }
         }
 
@@ -74,6 +75,7 @@ namespace UtilityPlugin
             set
             {
                 _weldmultiplier = value;
+                Save();
             }
         }
         #endregion

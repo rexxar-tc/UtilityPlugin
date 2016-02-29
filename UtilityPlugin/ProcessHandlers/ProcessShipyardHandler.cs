@@ -15,6 +15,7 @@ using IMyShipWelder = Sandbox.ModAPI.IMyShipWelder;
 using IMySlimBlock = Sandbox.ModAPI.IMySlimBlock;
 using IMyTerminalBlock = Sandbox.ModAPI.IMyTerminalBlock;
 using VRage.Game;
+using VRage.Game.Entity;
 
 namespace UtilityPlugin.ProcessHandlers
 {
@@ -35,7 +36,7 @@ namespace UtilityPlugin.ProcessHandlers
         }
 
         public MyOrientedBoundingBoxD ShipyardBox;
-        public List<IMyCubeBlock> Tools;
+        public readonly List<IMyCubeBlock> Tools = new List<IMyCubeBlock>();
         public ShipyardType YardType;
         public IMyEntity YardEntity;
 
@@ -81,13 +82,14 @@ namespace UtilityPlugin.ProcessHandlers
             if ( welders.Any( ) )
                 welders.Clear( );
 
+            List<IMyEntity> SkipEntities = new List<IMyEntity>();
 
             HashSet<IMyEntity> entities = new HashSet<IMyEntity>( );
             Wrapper.GameAction( ( ) =>
              {
                  MyAPIGateway.Entities.GetEntities( entities );
              } );
-
+            
 
             //run through our current list of shipyards and make sure they're still valid
             for ( int i = ShipyardsList.Count - 1; i >= 0; --i )
@@ -96,23 +98,32 @@ namespace UtilityPlugin.ProcessHandlers
 
                 if ( !AreToolsConnected( item.Tools ) )
                 {
-                    ShipyardsList.Remove( item );
-                }
-                if ( !item.YardEntity.Physics.IsStatic )
-                {
+                    UtilityPlugin.Log.Info("remove item tools " + item.Tools.Count.ToString()  );
                     ShipyardsList.Remove( item );
                 }
                 if ( !entities.Contains( item.YardEntity ) )
                 {
+                    UtilityPlugin.Log.Info("remove item entity"  );
                     ShipyardsList.Remove( item );
                 }
+                if ( !item.YardEntity.Physics.IsStatic )
+                {
+                    UtilityPlugin.Log.Info("remove item physics"  );
+                    ShipyardsList.Remove( item );
+                }
+
+                UtilityPlugin.Log.Info("evaluating shipyard"  );
+                SkipEntities.Add(item.YardEntity  );
                 //this should stop us recalculating a bounding box on an existing yard
                 //  entities.Remove(item.YardEntity);
             }
-
+            
             foreach ( IMyEntity entity in entities )
             {
                 if ( entity == null )
+                    continue;
+
+                if ( SkipEntities.Contains( entity ) )
                     continue;
 
                 if ( entity.Physics == null || !entity.Physics.IsStatic )
@@ -125,6 +136,7 @@ namespace UtilityPlugin.ProcessHandlers
                  {
                      ((IMyCubeGrid)entity).GetBlocks( gridBlocks );
                  } );
+
                 foreach ( IMySlimBlock slimBlock in gridBlocks )
                 {
                     if ( slimBlock == null )
@@ -151,23 +163,26 @@ namespace UtilityPlugin.ProcessHandlers
                     }
                     catch ( Exception ex )
                     {
-                        // UtilityPlugin.Log.Error(ex);
+                         UtilityPlugin.Log.Error(ex);
                     }
                 }
                 //make sure the shipyard blocks are all connected to the conveyor system
                 if ( grinders.Count == 8 )
                 {
+                    UtilityPlugin.Log.Info("class construct: " + grinders.Count.ToString()  );
                     MyOrientedBoundingBoxD? testBox = IsYardValid( entity, grinders );
                     if ( testBox.HasValue )
                     {
-                        ShipyardsList.Add( new ShipyardItem(
+                        ShipyardItem newItem = new ShipyardItem(
                             testBox.Value,
                             grinders,
                             ShipyardItem.ShipyardType.Grind,
-                            entity ) );
+                            entity );
+                        ShipyardsList.Add(newItem  );
+                        UtilityPlugin.Log.Info("class constructed: " + newItem.Tools.Count.ToString() );
                     }
                 }
-
+                
                 if ( welders.Count == 8 )
                 {
                     MyOrientedBoundingBoxD? testBox = IsYardValid( entity, welders );
@@ -181,23 +196,29 @@ namespace UtilityPlugin.ProcessHandlers
                     }
                 }
             }
-            UtilityPlugin.Log.Info( ShipyardsList.Count.ToString );
+
             base.Handle( );
         }
 
         //this makes sure all tools are connected to the same conveyor system
         private bool AreToolsConnected( List<IMyCubeBlock> tools )
         {
-            for ( int i = 1; i < tools.Count; ++i )
+            if ( tools.Count != 8 )
+                return false;
+            bool found = true;
+            Wrapper.GameAction( () =>
             {
-                IMyInventory toolInventory = (IMyInventory)((IMyShipToolBase)tools[0]).GetInventory( 0 );
-                IMyInventory compareInventory = (IMyInventory)((IMyShipToolBase)tools[i]).GetInventory( 0 );
-                if ( compareInventory == null || toolInventory == null )
-                    continue;
-                if ( !toolInventory.IsConnectedTo( compareInventory ) )
-                    return false;
-            }
-            return true;
+                for ( int i = 1; i < tools.Count; ++i )
+                {
+                    IMyInventory toolInventory = (IMyInventory) ((IMyShipToolBase) tools[0]).GetInventory( 0 );
+                    IMyInventory compareInventory = (IMyInventory) ((IMyShipToolBase) tools[i]).GetInventory( 0 );
+                    if ( compareInventory == null || toolInventory == null )
+                        continue;
+                    if ( !toolInventory.IsConnectedTo( compareInventory ) )
+                       found = false;
+                }
+            } );
+            return found;
         }
 
         private MyOrientedBoundingBoxD? IsYardValid( IMyEntity entity, List<IMyCubeBlock> tools )
@@ -209,15 +230,15 @@ namespace UtilityPlugin.ProcessHandlers
                 gridPoints.Add( tool.Position );
                 points.Add( tool.PositionComp.GetPosition( ) );
             }
-
+            
             if ( !AreToolsConnected( tools ) )
                 return null;
-
+            
             if ( MathUtility.ArePointsOrthogonal( gridPoints ) )
             {
                 return MathUtility.CreateOrientedBoundingBox( (MyCubeGrid)entity, points );
             }
-
+            
             return null;
         }
     }
