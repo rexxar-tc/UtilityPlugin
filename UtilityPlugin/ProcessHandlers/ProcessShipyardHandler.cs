@@ -36,7 +36,7 @@ namespace UtilityPlugin.ProcessHandlers
         }
 
         public MyOrientedBoundingBoxD ShipyardBox;
-        public readonly List<IMyCubeBlock> Tools = new List<IMyCubeBlock>();
+        public List<IMyCubeBlock> Tools;
         public ShipyardType YardType;
         public IMyEntity YardEntity;
 
@@ -48,7 +48,6 @@ namespace UtilityPlugin.ProcessHandlers
             HasGrid = false;
             Grid = null;
             GridBox = new MyOrientedBoundingBoxD( );
-            SplitGrids.Clear( );
             ProcessBlocks.Clear( );
         }
 
@@ -57,7 +56,6 @@ namespace UtilityPlugin.ProcessHandlers
         public bool HasGrid;
         public MyCubeGrid Grid;
         public MyOrientedBoundingBoxD GridBox;
-        public List<MyCubeGrid> SplitGrids = new List<MyCubeGrid>( );
         //tool, target block
         public SortedList<long, MySlimBlock> ProcessBlocks = new SortedList<long, MySlimBlock>( );
     }
@@ -67,7 +65,7 @@ namespace UtilityPlugin.ProcessHandlers
         private static List<IMyCubeBlock> grinders = new List<IMyCubeBlock>( );
         private static List<IMyCubeBlock> welders = new List<IMyCubeBlock>( );
 
-        public static List<ShipyardItem> ShipyardsList = new List<ShipyardItem>( );
+        public static List<ShipyardItem> ShipyardsList = new List<ShipyardItem>();
 
         public override int GetUpdateResolution( )
         {
@@ -175,7 +173,7 @@ namespace UtilityPlugin.ProcessHandlers
                     {
                         ShipyardItem newItem = new ShipyardItem(
                             testBox.Value,
-                            grinders,
+                            grinders.ToList(),
                             ShipyardItem.ShipyardType.Grind,
                             entity );
                         ShipyardsList.Add(newItem  );
@@ -190,7 +188,7 @@ namespace UtilityPlugin.ProcessHandlers
                     {
                         ShipyardsList.Add( new ShipyardItem(
                             testBox.Value,
-                            welders,
+                            welders.ToList(),
                             ShipyardItem.ShipyardType.Weld,
                             entity ) );
                     }

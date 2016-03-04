@@ -37,13 +37,6 @@ namespace UtilityPlugin.ProcessHandlers
                 if ( item.YardType != ShipyardItem.ShipyardType.Weld )
                     continue;
 
-                //we finished the grid and the entity was deleted
-                if ( item.Grid == null && !item.SplitGrids.Any() )
-                    item.Clear();
-                //if we have any split grids in the queue, load up the next one
-                else if ( item.Grid == null && item.SplitGrids.Any() )
-                    item.Grid = item.SplitGrids.First();
-
                 if ( !item.HasGrid )
                 {
                     var entities = new List<IMyEntity>();
@@ -117,7 +110,7 @@ namespace UtilityPlugin.ProcessHandlers
         {
             var missingComponents = new Dictionary<string, int>();
             var random = new Random();
-            var weldAmount = Server.Instance.Config.GrinderSpeedMultiplier*PluginSettings.Instance.GrindMultiplier;
+            var weldAmount = Server.Instance.Config.GrinderSpeedMultiplier * PluginSettings.Instance.GrindMultiplier;
             //shorten this to grid for convenience
             var grid = shipyardItem.Grid;
             if ( grid == null )
@@ -171,52 +164,55 @@ namespace UtilityPlugin.ProcessHandlers
                 }
             }
 
+            if ( shipyardItem.ProcessBlocks.Count < 1 )
+            {
+                //No more blocks to weld
+                return false;
+            }
+
             Wrapper.GameAction( () =>
             {
                 foreach ( var welderBlock in shipyardItem.Tools )
                 {
-                    var welder = (IMyShipWelder) welderBlock;
-                    var welderInventory = (MyInventory) welder.GetInventory( 0 );
+                    var welder = (IMyShipWelder)welderBlock;
+                    var welderInventory = (MyInventory)welder.GetInventory( 0 );
                     MySlimBlock block;
+
                     shipyardItem.ProcessBlocks.TryGetValue( welderBlock.EntityId, out block );
                     if ( block == null )
                         continue;
 
                     if ( block.IsFullIntegrity )
+                    {
+                        shipyardItem.ProcessBlocks.Remove( welder.EntityId );
                         continue;
+                    }
 
                     block.GetMissingComponents( missingComponents );
 
                     foreach ( var component in missingComponents )
                     {
                         var componentId = new MyDefinitionId( typeof (MyObjectBuilder_Component), component.Key );
-                        var amount = Math.Max( component.Value - (int) welderInventory.GetItemAmount( componentId ), 0 );
+                        var amount = Math.Max( component.Value - (int)welderInventory.GetItemAmount( componentId ), 0 );
                         if ( amount == 0 )
                             continue;
 
                         if ( welder.UseConveyorSystem )
                         {
-                            MyGridConveyorSystem.ItemPullRequest( (IMyConveyorEndpointBlock) welder, welderInventory,
+                            MyGridConveyorSystem.ItemPullRequest( (IMyConveyorEndpointBlock)welder, welderInventory,
                                                                   welder.OwnerId, componentId, component.Value );
                         }
                     }
 
-                    if ( block.CanContinueBuild( (MyInventory) welder.GetInventory( 0 ) ) )
+                    if ( block.CanContinueBuild( (MyInventory)welder.GetInventory( 0 ) ) )
                     {
-                        block.MoveItemsToConstructionStockpile( (MyInventory) welder.GetInventory( 0 ) );
+                        block.MoveItemsToConstructionStockpile( (MyInventory)welder.GetInventory( 0 ) );
                         block.IncreaseMountLevel( weldAmount, 0, null, 1f, true );
                     }
+                    else
+                        shipyardItem.ProcessBlocks.Remove( welder.EntityId );
                 }
             } );
-
-            //clean up the list of blocks to process
-            for ( var i = 0; i > shipyardItem.ProcessBlocks.Count; ++i )
-            {
-                //check the block at each element position, and remove the element if it's done welding
-                //this saves possible errors with comparing MySlimBlock later on
-                if ( shipyardItem.ProcessBlocks.ElementAt( i ).Value.IsFullIntegrity )
-                    shipyardItem.ProcessBlocks.RemoveAt( i );
-            }
 
             return true;
         }

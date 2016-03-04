@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Text;
 using NLog;
 using Sandbox.Common;
@@ -34,6 +36,24 @@ namespace UtilityPlugin.Utility
 
         private static readonly Logger Log = LogManager.GetLogger("PluginLog");
 
+        public static void SendPointsList( List<LineStruct> pointsList )
+        {
+            var messageString = MyAPIGateway.Utilities.SerializeToXML( pointsList );
+            var data = Encoding.UTF8.GetBytes( messageString );
+            BroadcastDataMessage(DataMessageType.Test, data );
+        }
+
+        public struct LineStruct
+        {
+            public LineStruct( Vector3D start, Vector3D end )
+            {
+                startPoint = start;
+                endPoint = end;
+            }
+            public Vector3D startPoint;
+            public Vector3D endPoint;
+        }
+
         public static void SendPublicInformation(string infoText)
         {
             if (infoText == "")
@@ -44,7 +64,7 @@ namespace UtilityPlugin.Utility
             MessageItem.Message = infoText;
 
             var messageString = MyAPIGateway.Utilities.SerializeToXML(MessageItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
 
             if (ChatManager.EnableData)
             {
@@ -68,7 +88,7 @@ namespace UtilityPlugin.Utility
             };
 
             var messageString = MyAPIGateway.Utilities.SerializeToXML(messageItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
 
             if (ChatManager.EnableData)
             {
@@ -94,7 +114,7 @@ namespace UtilityPlugin.Utility
             MessageItem.message = message;
 
             var messageString = MyAPIGateway.Utilities.SerializeToXML(MessageItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
 
             if (steamId != 0)
                 SendDataMessage(steamId, DataMessageType.Notification, data);
@@ -112,7 +132,7 @@ namespace UtilityPlugin.Utility
             MessageItem.buttonText = buttonText;
 
             var messageString = MyAPIGateway.Utilities.SerializeToXML(MessageItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
 
             SendDataMessage(steamId, DataMessageType.Dialog, data);
         }
@@ -120,7 +140,7 @@ namespace UtilityPlugin.Utility
         public static void DisplayDialog(ulong steamId, ServerDialogItem MessageItem)
         {
             var messageString = MyAPIGateway.Utilities.SerializeToXML(MessageItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
 
             SendDataMessage(steamId, DataMessageType.Dialog, data);
         }
@@ -135,7 +155,7 @@ namespace UtilityPlugin.Utility
             MoveItem.entityId = entityId;
 
             var messageString = MyAPIGateway.Utilities.SerializeToXML(MoveItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
             if (steamId != 0)
                 SendDataMessage(steamId, DataMessageType.Move, data);
             else
@@ -151,7 +171,7 @@ namespace UtilityPlugin.Utility
             MoveItem.z = position.Z;
 
             var messageString = MyAPIGateway.Utilities.SerializeToXML(MoveItem);
-            var data = Encoding.Unicode.GetBytes(messageString);
+            var data = Encoding.UTF8.GetBytes(messageString);
 
             SendDataMessage(steamId, DataMessageType.Move, data);
         }
