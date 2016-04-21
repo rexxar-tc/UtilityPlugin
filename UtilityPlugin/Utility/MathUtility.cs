@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Sandbox.ModAPI;
+using VRage.Game.ModAPI;
 using VRageMath;
 
 namespace UtilityPlugin.Utility
@@ -19,25 +19,25 @@ namespace UtilityPlugin.Utility
                 return false;
 
             //get a list of unique Z values
-            var zVals = points.Select( x => x.Z ).Distinct().ToList();
+            List<int> zVals = points.Select( x => x.Z ).Distinct().ToList();
 
             //we should only have two
             if ( zVals.Count() != 2 )
                 return false;
 
             //get a list of all points in the two Z planes
-            var zPlaneMax = points.FindAll( x => x.Z == zVals.Max() );
-            var zPlaneMin = points.FindAll( x => x.Z == zVals.Min() );
+            List<Vector3I> zPlaneMax = points.FindAll( x => x.Z == zVals.Max() );
+            List<Vector3I> zPlaneMin = points.FindAll( x => x.Z == zVals.Min() );
 
             //we should have four of each
             if ( zPlaneMin.Count() != 4 || zPlaneMax.Count() != 4 )
                 return false;
 
             //make sure each vertex in the maxZ plane has the same X and Y as only one point in the minZ plane
-            foreach ( var zMaxPoint in zPlaneMax )
+            foreach ( Vector3I zMaxPoint in zPlaneMax )
             {
                 var matchCount = 0;
-                foreach ( var zMinPoint in zPlaneMin )
+                foreach ( Vector3I zMinPoint in zPlaneMin )
                 {
                     if ( zMinPoint.X == zMaxPoint.X
                          && zMinPoint.Y == zMaxPoint.Y )
@@ -50,70 +50,83 @@ namespace UtilityPlugin.Utility
             return true;
         }
 
+        /// <summary>
+        ///     Create an OBB that encloses a grid
+        /// </summary>
+        /// <param name="grid"></param>
+        /// <returns></returns>
         public static MyOrientedBoundingBoxD? CreateOrientedBoundingBox( IMyCubeGrid grid )
         {
-            var verticies = new List<Vector3D>();
-            verticies.Add( grid.GridIntegerToWorld( grid.Min ) );
-            verticies.Add( grid.GridIntegerToWorld( grid.Max ) );
+            Quaternion gridQuaternion = Quaternion.CreateFromForwardUp(
+                Vector3.Normalize( grid.WorldMatrix.Forward ),
+                Vector3.Normalize( grid.WorldMatrix.Up ) );
 
-            return CreateOrientedBoundingBox( grid, verticies );
+            Vector3D[] aabbcorner = new Vector3D[8];
+            grid.PositionComp.WorldAABB.GetCorners( aabbcorner );
+            var gridHalf = grid.WorldAABB.HalfExtents;
+            Vector3D halfExtents = new Vector3D( gridHalf.X * .9, gridHalf.Y * .9, gridHalf.Z * .9 );
+
+            return new MyOrientedBoundingBoxD( grid.PositionComp.WorldAABB.Center, halfExtents, gridQuaternion );
         }
 
+        /// <summary>
+        ///     Create an OBB from a list of verticies and align it to a grid
+        /// </summary>
+        /// <param name="grid"></param>
+        /// <param name="verticies"></param>
+        /// <returns></returns>
         public static MyOrientedBoundingBoxD? CreateOrientedBoundingBox( IMyCubeGrid grid, List<Vector3D> verticies )
         {
             //because I'm paranoid
-            if ( grid == null )
-                return null;
-            if ( grid.Physics == null )
+            if ( grid?.Physics == null || grid.Closed )
                 return null;
             if ( verticies.Count == 0 )
                 return null;
 
             //create the quaternion to rotate the box around
-            var yardQuaternion = Quaternion.CreateFromForwardUp(
+            Quaternion yardQuaternion = Quaternion.CreateFromForwardUp(
                 Vector3.Normalize( grid.WorldMatrix.Forward ),
                 Vector3.Normalize( grid.WorldMatrix.Up ) );
-            
+
             //find the center of the volume
-            Vector3D yardCenter = new Vector3D();
-                
+            var yardCenter = new Vector3D();
+
             foreach ( Vector3D vertex in verticies )
-            {
-                yardCenter=Vector3D.Add( yardCenter, vertex );
-            }
+                yardCenter = Vector3D.Add( yardCenter, vertex );
 
             yardCenter = Vector3D.Divide( yardCenter, verticies.Count );
 
-            //find the dimensions of the box. 
-            //we're converting to the grid coordinates because the math is easier
-            var gridVerticies = new List<Vector3I>();
+            //find the dimensions of the box.
 
-            foreach ( var vertex in verticies )
-                gridVerticies.Add( grid.WorldToGridInteger( vertex ) );
+            //convert verticies to grid coordinates to find adjoining neighbors
+            List<Vector3I> gridVerticies = new List<Vector3I>( verticies.Count );
 
-            var referenceVertex = gridVerticies[0];
-            var xLength = 0;
-            var yLength = 0;
-            var zLength = 0;
+            foreach ( var vertext in verticies )
+                gridVerticies.Add( grid.WorldToGridInteger( vertext ) );
+
+            Vector3D referenceVertex = verticies[0];
+            var xLength = 0d;
+            var yLength = 0d;
+            var zLength = 0d;
 
             //finds the length of each axis
-            for ( var i = 1; i < gridVerticies.Count; ++i )
+            for ( var i = 1; i < verticies.Count; ++i )
             {
-                var thisVertex = gridVerticies[i];
-                if ( referenceVertex.Y == thisVertex.Y
-                     && referenceVertex.Z == thisVertex.Z )
-                    xLength = Math.Abs( referenceVertex.X - thisVertex.X );
+                Vector3D thisVertex = verticies[i];
+                if ( gridVerticies[0].Y == gridVerticies[i].Y
+                     && gridVerticies[0].Z == gridVerticies[i].Z )
+                    xLength = Math.Abs( Vector3D.Distance( referenceVertex, thisVertex ) );
 
-                if ( referenceVertex.X == thisVertex.X
-                     && referenceVertex.Z == thisVertex.Z )
-                    yLength = Math.Abs( referenceVertex.Y - thisVertex.Y );
+                if ( gridVerticies[0].X == gridVerticies[i].X
+                     && gridVerticies[0].Z == gridVerticies[i].Z )
+                    yLength = Math.Abs( Vector3D.Distance( referenceVertex, thisVertex ) );
 
-                if ( referenceVertex.X == thisVertex.X
-                     && referenceVertex.Y == thisVertex.Y )
-                    zLength = Math.Abs( referenceVertex.Z - thisVertex.Z );
+                if ( gridVerticies[0].X == gridVerticies[i].X
+                     && gridVerticies[0].Y == gridVerticies[i].Y )
+                    zLength = Math.Abs( Vector3D.Distance( referenceVertex, thisVertex ) );
             }
 
-            var halfExtents = new Vector3D( xLength/2, yLength/2, zLength/2 );
+            var halfExtents = new Vector3D( xLength / 2, yLength / 2, zLength / 2 );
 
             //FINALLY we can make the bounding box
             return new MyOrientedBoundingBoxD( yardCenter, halfExtents, yardQuaternion );

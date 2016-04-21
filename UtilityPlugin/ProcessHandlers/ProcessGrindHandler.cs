@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using Sandbox.Common.ObjectBuilders.Definitions;
 using Sandbox.Game;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Entities.Cube;
@@ -11,142 +9,163 @@ using Sandbox.ModAPI;
 using Sandbox.ModAPI.Ingame;
 using SEModAPIExtensions.API;
 using UtilityPlugin.Utility;
+using VRage;
 using VRage.Game;
 using VRage.Game.Entity;
+using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRageMath;
-using IMyCubeBlock = Sandbox.ModAPI.IMyCubeBlock;
-using IMyCubeGrid = Sandbox.ModAPI.IMyCubeGrid;
-using IMyInventory = Sandbox.ModAPI.IMyInventory;
-using IMySlimBlock = Sandbox.ModAPI.IMySlimBlock;
-using IMyTerminalBlock = Sandbox.ModAPI.IMyTerminalBlock;
 
 namespace UtilityPlugin.ProcessHandlers
 {
     public class ProcessGrindHandler : ProcessHandlerBase
     {
-        public static MyDisconnectHelper disconnect = new MyDisconnectHelper();
-        private static int updateCount = 0;
+        private static DisconnectHelper disconnect = new DisconnectHelper();
 
         public override int GetUpdateResolution()
         {
-            return 1000;
+            return 500;
         }
 
         public override void Handle()
         {
-            if ( !ProcessShipyardHandler.ShipyardsList.Any() )
-                return;
-
-            foreach ( ShipyardItem item in ProcessShipyardHandler.ShipyardsList )
+            lock ( ProcessShipyardHandler.ShipyardsList )
             {
-                //TODO: Do something with this when we have the ingame GUI set up
-                //if (!item.Enabled)
-                //    continue;
-
-                if ( item.YardType != ShipyardItem.ShipyardType.Grind )
-                    continue;
-
-                if ( item.HasGrid && item.Grid == null )
+                foreach ( ShipyardItem item in ProcessShipyardHandler.ShipyardsList.Where( item => item.YardType == ShipyardItem.ShipyardType.Grind ) )
                 {
-                    item.Clear();
-                    return;
-                }
+                    //check if the grid we're looking at is done grinding and ready to be deleted
+                    if ( item.HasGrid )
+                    {
+                        if ( item.Grid?.Physics == null || item.Grid.Closed )
+                        {
+                            //item.HasGrid = false;
+                            item.Clear();
+                            continue;
 
-                if ( !item.HasGrid )
-                {
-                    List<IMyEntity> entities = new List<IMyEntity>();
+                            //check if there's any other grids in our list to process
+                            if ( item.YardGrids.Count < 1 )
+                            {
+                                item.Clear();
+                                continue;
+                            }
+
+                            item.Grid = item.YardGrids[0];
+                            item.YardGrids.RemoveAt( 0 );
+                            //just in case this grid is also closed for some reason
+                            if ( item.Grid?.Physics == null || item.Grid.Closed )
+                                continue;
+                        }
+
+                        //check if the target ship has left the shipyard
+                        var testBox = MathUtility.CreateOrientedBoundingBox( item.Grid );
+                        if ( testBox == null )
+                        {
+                            UtilityPlugin.Log.Info( "grid left yard" );
+                            item.Clear();
+                            continue;
+                        }
+                        var gridBox = testBox.Value;
+                        if ( item.ShipyardBox.Contains( ref gridBox ) != ContainmentType.Contains )
+                        {
+                            UtilityPlugin.Log.Info( "grid left yard" );
+                            item.Clear();
+                            continue;
+                        }
+
+                        StepGrind( item );
+                        continue;
+                    }
+
+                    item.Grid.Stop();
+                    foreach ( MyCubeGrid yardGrid in item.YardGrids )
+                        yardGrid.Stop();
+
+                    var allEntities = new HashSet<MyEntity>();
+                    var grids = new HashSet<MyCubeGrid>();
 
                     //we can't get entities in a oriented bounding box, so create a sphere around the whole thing
                     //this is just to find entities in the general area, we check later against the box
-                    BoundingSphereD entitySphere = new BoundingSphereD( item.ShipyardBox.Center,
-                                                                        item.ShipyardBox.HalfExtent.AbsMax() );
+                    var entitySphere = new BoundingSphereD( item.ShipyardBox.Center,
+                                                            item.ShipyardBox.HalfExtent.AbsMax() );
 
-                    Wrapper.GameAction(
-                        () => { entities = MyAPIGateway.Entities.GetEntitiesInSphere( ref entitySphere ); } );
-                    if ( !entities.Any() )
+                    Wrapper.GameAction( () => allEntities = MyEntities.GetEntities() );
+
+                    foreach ( MyEntity entity in allEntities.Where( x => x is MyCubeGrid ) )
+                    {
+                        if ( entitySphere.Contains( entity.PositionComp.GetPosition() ) == ContainmentType.Contains )
+                            grids.Add( entity as MyCubeGrid );
+                    }
+
+                    if ( grids.Count < 1 )
                         continue;
 
-
-                    foreach ( IMyEntity entity in entities )
+                    foreach ( MyCubeGrid grid in grids )
                     {
-                        var grid = entity as MyCubeGrid;
-                        if ( grid == null )
+                        if ( grid?.Physics == null || grid.Closed )
                             continue;
 
+                        //no grinding stations
                         if ( grid.Physics.IsStatic )
                             continue;
 
-                        if ( item.HasGrid && item.Grid == grid )
-                        {
-                            //TODO: alert the player
-                            //there's multiple grids inside the shipyard before grind start
-                            //item.HasGrid = false;
-                            //break;
-                        }
+                        //create a bounding box around the ship
                         MyOrientedBoundingBoxD? testBox = MathUtility.CreateOrientedBoundingBox( grid );
+
                         if ( !testBox.HasValue )
                             continue;
+
                         MyOrientedBoundingBoxD gridBox = testBox.Value;
-                        UtilityPlugin.Log.Info( item.ShipyardBox.Center.ToString );
-                        UtilityPlugin.Log.Info( gridBox.Center.ToString );
-                        UtilityPlugin.Log.Info( item.ShipyardBox.Contains( ref gridBox ).ToString );
-                        if (
-                            item.ShipyardBox.Contains( ref gridBox ) == ContainmentType.Contains )
+
+                        //check if the ship bounding box is completely inside the yard box
+                        if ( item.ShipyardBox.Contains( ref gridBox ) == ContainmentType.Contains )
                         {
-                            //don't allow ships to be welded if they're moving
-                            if ( grid.Physics.LinearVelocity == Vector3D.Zero
-                                 && grid.Physics.AngularVelocity == Vector3D.Zero )
+                            if ( !item.HasGrid )
                             {
                                 item.HasGrid = true;
                                 item.Grid = grid;
-                                item.GridBox = gridBox;
                             }
+                            else
+                                item.YardGrids.Add( grid );
                         }
                     }
                 }
-                if ( item.HasGrid )
-                    StepGrind( item );
             }
+
             base.Handle();
         }
-
+        
         private static void StepGrind( ShipyardItem shipyardItem )
         {
-            //clear out the list of blocks to process every 100 updates in case one gets stuck
-            updateCount++;
-            if ( updateCount > 100 )
-            {
-                shipyardItem.ProcessBlocks.Clear();
-                updateCount = 0;
-            }
-            Random random = new Random();
+            var random = new Random();
             float grindAmount = Server.Instance.Config.GrinderSpeedMultiplier * PluginSettings.Instance.GrindMultiplier;
+            HashSet<long> grindersToRemove = new HashSet<long>();
             //shorten this to grid for convenience
             MyCubeGrid grid = shipyardItem.Grid;
-            if ( grid == null )
-            {
-                shipyardItem.Clear();
-                return;
-            }
-            if ( grid.BlocksCount < 1 )
-            {
-                shipyardItem.Clear();
-                return;
-            }
 
-            if ( grid.Physics.LinearVelocity != Vector3D.Zero
-                 || grid.Physics.AngularVelocity != Vector3D.Zero )
+            if ( grid?.Physics == null || grid.Closed )
                 return;
+
+            if ( grid.BlocksCount < 1 )
+                return;
+
             //do a raycast to see if the grinder can see the block we're assigning to it
             foreach ( IMyCubeBlock listGrinder in shipyardItem.Tools )
             {
                 MySlimBlock nextBlock;
                 if ( !shipyardItem.ProcessBlocks.TryGetValue( listGrinder.EntityId, out nextBlock ) )
                 {
-                    int tryCount = 0;
+                    var tryCount = 0;
+
+                    //TODO: optimize the try count instead of picking an arbitrary value
+                    //what the hell does that mean?
                     while ( tryCount < 30 )
                     {
+                        if ( grid?.Physics == null )
+                            return;
+
+                        if ( grid.Physics.LinearVelocity != Vector3D.Zero || grid.Physics.AngularVelocity != Vector3D.Zero )
+                            grid.Stop();
+
                         //limit the number of tries so we don't get stuck in a loop forever
                         tryCount++;
 
@@ -156,76 +175,67 @@ namespace UtilityPlugin.ProcessHandlers
 
                         //if we have less than 30 blocks total, just iterate through them, it's faster than going at random
                         else
-                            nextBlock = grid.CubeBlocks.ElementAt( tryCount );
-
+                            nextBlock = grid.CubeBlocks.ElementAt( Math.Min( tryCount, grid.BlocksCount - 1 ) );
                         if ( nextBlock == null )
                             continue;
 
                         if ( shipyardItem.ProcessBlocks.ContainsValue( nextBlock ) )
                             continue;
-                        
+
                         //this raycast should give us the grid location of the first block it hits 
                         //we don't really care if it hits our random block, just grab whatever the grinder sees first
                         Vector3I? blockResult = grid.RayCastBlocks( listGrinder.GetPosition(),
                                                                     grid.GridIntegerToWorld( nextBlock.Position ) );
                         if ( !blockResult.HasValue )
                             continue;
-
-                        //TODO: uncomment this when my PR is merged
+                        
+                        //TODO: remove this when my PR is merged
                         //check if removing this block will split the grid
-                        //if ( disconnect.TryDisconnect( nextBlock ) )
-                        //    continue;
-
-                        //TODO: murder this method when PR is merged
-                        if ( CheckGridSplit( nextBlock ) )
+                        if ( disconnect.TryDisconnect(grid.GetCubeBlock(blockResult.Value)) )
+                        {
+                            //UtilityPlugin.Log.Info( "detected split" );
                             continue;
+                        }
 
                         nextBlock = grid.GetCubeBlock( blockResult.Value );
+                        
                         break;
                     }
 
                     //we weren't able to find a suitable block somehow, so skip this grinder for now
                     if ( nextBlock == null )
                         continue;
+
                     //we found a block to pair with our grinder, add it to the dictionary and carry on with destruction
                     shipyardItem.ProcessBlocks.Add( listGrinder.EntityId, nextBlock );
                 }
             }
-
-            List<Communication.LineStruct> pointsList = new List<Communication.LineStruct>();
-            foreach ( long toolId in shipyardItem.ProcessBlocks.Keys )
-            {
-                MySlimBlock nextBlock;
-                if ( !shipyardItem.ProcessBlocks.TryGetValue( toolId, out nextBlock ) )
-                    continue;
-                IMyEntity toolBlock;
-                if ( !MyAPIGateway.Entities.TryGetEntityById( toolId, out toolBlock ) )
-                    continue;
-                pointsList.Add( new Communication.LineStruct( toolBlock.PositionComp.GetPosition(),shipyardItem.Grid.GridIntegerToWorld( nextBlock.Position ))  );
-            }
-            Communication.SendPointsList( pointsList );
-            List<MyPhysicalInventoryItem> tmpItemList = new List<MyPhysicalInventoryItem>();
+            var tmpItemList = new List<MyPhysicalInventoryItem>();
 
             foreach ( IMyCubeBlock grinderBlock in shipyardItem.Tools )
             {
-                IMyShipGrinder grinder = (IMyShipGrinder)grinderBlock;
+                var grinder = (IMyShipGrinder)grinderBlock;
 
-                MyInventory grinderInventory = (MyInventory)grinder.GetInventory( 0 );
+                var grinderInventory = (MyInventory)grinder.GetInventory( 0 );
                 MySlimBlock block;
 
                 if ( !shipyardItem.ProcessBlocks.TryGetValue( grinderBlock.EntityId, out block ) )
                     continue;
 
-               // if ( disconnect.TryDisconnect( block ) )
-               // {
-               //     shipyardItem.ProcessBlocks.Remove(grinderBlock.EntityId);
-               //     continue;
-               // }
+                if ( block?.CubeGrid?.Physics == null )
+                    continue;
+
+                if ( disconnect.TryDisconnect( block ) )
+                {
+                    //UtilityPlugin.Log.Info( "detected split at grind" );
+                    shipyardItem.ProcessBlocks.Remove( grinderBlock.EntityId );
+                    continue;
+                }
 
                 Wrapper.GameAction( () =>
                 {
-                    MyDamageInformation damageInfo = new MyDamageInformation( false, grindAmount, MyDamageType.Grind,
-                                                                              grinder.EntityId );
+                    var damageInfo = new MyDamageInformation( false, grindAmount, MyDamageType.Grind,
+                                                              grinder.EntityId );
                     if ( block.UseDamageSystem )
                         MyDamageSystem.Static.RaiseBeforeDamageApplied( block, ref damageInfo );
 
@@ -238,9 +248,9 @@ namespace UtilityPlugin.ProcessHandlers
                     {
                         if ( block.FatBlock != null && block.FatBlock.HasInventory )
                         {
-                            for ( int i = 0; i < block.FatBlock.InventoryCount; ++i )
+                            for ( var i = 0; i < block.FatBlock.InventoryCount; ++i )
                             {
-                                var blockInventory = block.FatBlock.GetInventory( i );
+                                MyInventory blockInventory = block.FatBlock.GetInventory( i );
                                 if ( blockInventory == null )
                                     continue;
 
@@ -250,7 +260,7 @@ namespace UtilityPlugin.ProcessHandlers
                                 tmpItemList.Clear();
                                 tmpItemList.AddList( blockInventory.GetItems() );
 
-                                foreach ( var item in tmpItemList )
+                                foreach ( MyPhysicalInventoryItem item in tmpItemList )
                                     MyInventory.Transfer( blockInventory, grinderInventory, item.ItemId );
                             }
                         }
@@ -260,46 +270,34 @@ namespace UtilityPlugin.ProcessHandlers
 
                         block.SpawnConstructionStockpile();
                         block.CubeGrid.RazeBlock( block.Min );
-                        shipyardItem.ProcessBlocks.Remove( grinderBlock.EntityId );
+                        grindersToRemove.Add( grinderBlock.EntityId );
                     }
                 } );
-            }
-        }
-        //this should check if removing a block splits the grid
-
-        private static HashSet<MySlimBlock> blocksList = new HashSet<MySlimBlock>( );
-
-        public static bool CheckGridSplit( MySlimBlock testBlock )
-        {
-            MyCubeGrid grid = testBlock.CubeGrid;
-
-            if ( testBlock.Neighbours.Count <= 1 )
-                return false;
-
-            MySlimBlock firstBlock = testBlock.Neighbours[0];
-
-            FindUniqueNeighbors( firstBlock, testBlock );
-            
-            if ( blocksList.Count + 1 < grid.BlocksCount )
-            {
-                blocksList.Clear( );
-                return true;
-            }
-            blocksList.Clear( );
-            return false;
-        }
-
-        private static void FindUniqueNeighbors( MySlimBlock testBlock, MySlimBlock targetBlock )
-        {
-            foreach ( MySlimBlock testNeighbor in testBlock.Neighbours )
-            {
-                if ( testNeighbor == targetBlock )
-                    continue;
-
-                if ( !blocksList.Contains( testNeighbor ) )
+                foreach ( var tool in shipyardItem.Tools )
                 {
-                    blocksList.Add( testNeighbor );
-                    FindUniqueNeighbors( testNeighbor, targetBlock );
+                    MySlimBlock targetBlock;
+                    Communication.MessageStruct message = new Communication.MessageStruct()
+                    {
+                        toolId = tool.EntityId,
+                        gridId = 0,
+                        blockPos = new SerializableVector3I( 0, 0, 0 ),
+                        packedColor = 0,
+                        pulse = false
+                    };
+                    if ( !shipyardItem.ProcessBlocks.TryGetValue( tool.EntityId, out targetBlock ) )
+                    {
+                        Communication.SendLine( message );
+                        continue;
+                    }
+                    message.gridId = targetBlock.CubeGrid.EntityId;
+                    message.blockPos = targetBlock.Position;
+                    message.packedColor = Color.OrangeRed.PackedValue;
+                    Communication.SendLine( message );
+                }
+
+                foreach ( long removeId in grindersToRemove )
+                {
+                    shipyardItem.ProcessBlocks.Remove( removeId );
                 }
             }
         }

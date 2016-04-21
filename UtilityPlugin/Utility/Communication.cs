@@ -6,6 +6,7 @@ using NLog;
 using Sandbox.Common;
 using Sandbox.ModAPI;
 using SEModAPIExtensions.API;
+using VRage;
 using VRage.Game;
 using VRageMath;
 
@@ -35,25 +36,23 @@ namespace UtilityPlugin.Utility
         }
 
         private static readonly Logger Log = LogManager.GetLogger("PluginLog");
-
-        public static void SendPointsList( List<LineStruct> pointsList )
+        
+        public struct MessageStruct
         {
-            var messageString = MyAPIGateway.Utilities.SerializeToXML( pointsList );
+            public long toolId;
+            public long gridId;
+            public SerializableVector3I blockPos;
+            public uint packedColor;
+            public bool pulse;
+        }
+
+        public static void SendLine( MessageStruct message )
+        {
+            var messageString = MyAPIGateway.Utilities.SerializeToXML( message );
             var data = Encoding.UTF8.GetBytes( messageString );
-            BroadcastDataMessage(DataMessageType.Test, data );
+            Wrapper.GameAction( () => MyAPIGateway.Multiplayer.SendMessageToOthers( 7747, data ) );
         }
-
-        public struct LineStruct
-        {
-            public LineStruct( Vector3D start, Vector3D end )
-            {
-                startPoint = start;
-                endPoint = end;
-            }
-            public Vector3D startPoint;
-            public Vector3D endPoint;
-        }
-
+        
         public static void SendPublicInformation(string infoText)
         {
             if (infoText == "")
@@ -190,7 +189,7 @@ namespace UtilityPlugin.Utility
 
             Buffer.BlockCopy(data, 0, newData, msgIdString.Length + 1, data.Length);
 
-            Wrapper.GameAction(() => { MyAPIGateway.Multiplayer.SendMessageTo(9000, newData, steamId); });
+            Wrapper.GameAction(() => MyAPIGateway.Multiplayer.SendMessageTo(9000, newData, steamId));
             //ServerNetworkManager.SendDataMessage( 9000, newData, steamId );
         }
 
@@ -207,7 +206,7 @@ namespace UtilityPlugin.Utility
 
             Buffer.BlockCopy(data, 0, newData, msgIdString.Length + 1, data.Length);
 
-            Wrapper.GameAction(() => { MyAPIGateway.Multiplayer.SendMessageToOthers(9000, newData); });
+            Wrapper.GameAction(() => MyAPIGateway.Multiplayer.SendMessageToOthers(9000, newData));
         }
 
         public class ServerMessageItem

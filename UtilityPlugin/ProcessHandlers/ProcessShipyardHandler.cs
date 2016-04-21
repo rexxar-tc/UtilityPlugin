@@ -6,16 +6,14 @@ using Sandbox.Game.Entities.Cube;
 using Sandbox.ModAPI;
 using Sandbox.ModAPI.Ingame;
 using UtilityPlugin.Utility;
+using VRage;
 using VRage.ModAPI;
 using VRageMath;
-using IMyCubeBlock = Sandbox.ModAPI.IMyCubeBlock;
-using IMyCubeGrid = Sandbox.ModAPI.IMyCubeGrid;
-using IMyInventory = Sandbox.ModAPI.IMyInventory;
-using IMyShipWelder = Sandbox.ModAPI.IMyShipWelder;
-using IMySlimBlock = Sandbox.ModAPI.IMySlimBlock;
-using IMyTerminalBlock = Sandbox.ModAPI.IMyTerminalBlock;
 using VRage.Game;
 using VRage.Game.Entity;
+using VRage.Game.ModAPI;
+using IMyShipWelder = Sandbox.ModAPI.IMyShipWelder;
+using IMyTerminalBlock = Sandbox.ModAPI.IMyTerminalBlock;
 
 namespace UtilityPlugin.ProcessHandlers
 {
@@ -32,7 +30,8 @@ namespace UtilityPlugin.ProcessHandlers
         public enum ShipyardType
         {
             Weld,
-            Grind
+            Grind,
+            Disabled
         }
 
         public MyOrientedBoundingBoxD ShipyardBox;
@@ -47,17 +46,29 @@ namespace UtilityPlugin.ProcessHandlers
             Enabled = false;
             HasGrid = false;
             Grid = null;
-            GridBox = new MyOrientedBoundingBoxD( );
             ProcessBlocks.Clear( );
+            YardGrids.Clear();
+            foreach ( var tool in Tools)
+            {
+                Communication.MessageStruct message = new Communication.MessageStruct()
+                {
+                    toolId=tool.EntityId,
+                    gridId=0,
+                    blockPos=new SerializableVector3I(0,0,0),
+                    packedColor=0,
+                    pulse=false
+                };
+                Communication.SendLine( message );
+            }
         }
 
         public bool Enabled;
         //these are set when processing a grid
         public bool HasGrid;
         public MyCubeGrid Grid;
-        public MyOrientedBoundingBoxD GridBox;
         //tool, target block
         public SortedList<long, MySlimBlock> ProcessBlocks = new SortedList<long, MySlimBlock>( );
+        public List<MyCubeGrid> YardGrids = new List<MyCubeGrid>();
     }
 
     public class ProcessShipyardHandler : ProcessHandlerBase
@@ -80,7 +91,7 @@ namespace UtilityPlugin.ProcessHandlers
             if ( welders.Any( ) )
                 welders.Clear( );
 
-            List<IMyEntity> SkipEntities = new List<IMyEntity>();
+            List<IMyEntity> skipEntities = new List<IMyEntity>();
 
             HashSet<IMyEntity> entities = new HashSet<IMyEntity>( );
             Wrapper.GameAction( ( ) =>
@@ -90,38 +101,42 @@ namespace UtilityPlugin.ProcessHandlers
             
 
             //run through our current list of shipyards and make sure they're still valid
-            for ( int i = ShipyardsList.Count - 1; i >= 0; --i )
+            lock ( ShipyardsList )
             {
-                ShipyardItem item = ShipyardsList[i];
+                for ( int i = ShipyardsList.Count - 1; i >= 0; --i )
+                {
+                    ShipyardItem item = ShipyardsList[i];
 
-                if ( !AreToolsConnected( item.Tools ) )
-                {
-                    UtilityPlugin.Log.Info("remove item tools " + item.Tools.Count.ToString()  );
-                    ShipyardsList.Remove( item );
-                }
-                if ( !entities.Contains( item.YardEntity ) )
-                {
-                    UtilityPlugin.Log.Info("remove item entity"  );
-                    ShipyardsList.Remove( item );
-                }
-                if ( !item.YardEntity.Physics.IsStatic )
-                {
-                    UtilityPlugin.Log.Info("remove item physics"  );
-                    ShipyardsList.Remove( item );
-                }
+                    if ( !AreToolsConnected( item.Tools ) )
+                    {
+                        UtilityPlugin.Log.Info( "remove item tools " + item.Tools.Count );
+                        ShipyardsList.Remove( item );
+                        continue;
+                    }
+                    if ( !entities.Contains( item.YardEntity ) )
+                    {
+                        UtilityPlugin.Log.Info( "remove item entity" );
+                        ShipyardsList.Remove( item );
+                        continue;
+                    }
+                    if ( !item.YardEntity.Physics.IsStatic )
+                    {
+                        UtilityPlugin.Log.Info( "remove item physics" );
+                        ShipyardsList.Remove( item );
+                        continue;
+                    }
 
-                UtilityPlugin.Log.Info("evaluating shipyard"  );
-                SkipEntities.Add(item.YardEntity  );
-                //this should stop us recalculating a bounding box on an existing yard
-                //  entities.Remove(item.YardEntity);
+                    //skipEntities.Add(item.YardEntity  );
+                    //this should stop us recalculating a bounding box on an existing yard
+                    //  entities.Remove(item.YardEntity);
+                }
             }
-            
             foreach ( IMyEntity entity in entities )
             {
-                if ( entity == null )
+                if ( entity == null || entity.Closed )
                     continue;
 
-                if ( SkipEntities.Contains( entity ) )
+                if ( skipEntities.Contains( entity ) )
                     continue;
 
                 if ( entity.Physics == null || !entity.Physics.IsStatic )
@@ -129,6 +144,7 @@ namespace UtilityPlugin.ProcessHandlers
 
                 if ( !(entity is IMyCubeGrid) )
                     continue;
+
                 List<IMySlimBlock> gridBlocks = new List<IMySlimBlock>( );
                 Wrapper.GameAction( ( ) =>
                  {
@@ -167,17 +183,14 @@ namespace UtilityPlugin.ProcessHandlers
                 //make sure the shipyard blocks are all connected to the conveyor system
                 if ( grinders.Count == 8 )
                 {
-                    UtilityPlugin.Log.Info("class construct: " + grinders.Count.ToString()  );
                     MyOrientedBoundingBoxD? testBox = IsYardValid( entity, grinders );
                     if ( testBox.HasValue )
                     {
-                        ShipyardItem newItem = new ShipyardItem(
-                            testBox.Value,
-                            grinders.ToList(),
-                            ShipyardItem.ShipyardType.Grind,
-                            entity );
-                        ShipyardsList.Add(newItem  );
-                        UtilityPlugin.Log.Info("class constructed: " + newItem.Tools.Count.ToString() );
+                        ShipyardsList.Add( new ShipyardItem(
+                                               testBox.Value,
+                                               grinders.ToList(),
+                                               ShipyardItem.ShipyardType.Grind,
+                                               entity ) );
                     }
                 }
                 
@@ -187,10 +200,10 @@ namespace UtilityPlugin.ProcessHandlers
                     if ( testBox.HasValue )
                     {
                         ShipyardsList.Add( new ShipyardItem(
-                            testBox.Value,
-                            welders.ToList(),
-                            ShipyardItem.ShipyardType.Weld,
-                            entity ) );
+                                               testBox.Value,
+                                               welders.ToList(),
+                                               ShipyardItem.ShipyardType.Weld,
+                                               entity ) );
                     }
                 }
             }
@@ -221,6 +234,7 @@ namespace UtilityPlugin.ProcessHandlers
 
         private MyOrientedBoundingBoxD? IsYardValid( IMyEntity entity, List<IMyCubeBlock> tools )
         {
+            DateTime startTime = DateTime.Now;
             List<Vector3D> points = new List<Vector3D>( );
             List<Vector3I> gridPoints = new List<Vector3I>( );
             foreach ( IMyCubeBlock tool in tools )
@@ -234,7 +248,11 @@ namespace UtilityPlugin.ProcessHandlers
             
             if ( MathUtility.ArePointsOrthogonal( gridPoints ) )
             {
-                return MathUtility.CreateOrientedBoundingBox( (MyCubeGrid)entity, points );
+                UtilityPlugin.Log.Info( "APO Time: " + (DateTime.Now - startTime).Milliseconds );
+                startTime = DateTime.Now;
+                MyOrientedBoundingBoxD? returnBox = MathUtility.CreateOrientedBoundingBox( (MyCubeGrid)entity, points );
+                UtilityPlugin.Log.Info( "OBB Time: " + (DateTime.Now - startTime).Milliseconds );
+                return returnBox;
             }
             
             return null;
