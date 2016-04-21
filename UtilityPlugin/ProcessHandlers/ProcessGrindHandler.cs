@@ -39,8 +39,8 @@ namespace UtilityPlugin.ProcessHandlers
                         if ( item.Grid?.Physics == null || item.Grid.Closed )
                         {
                             //item.HasGrid = false;
-                            item.Clear();
-                            continue;
+                            //item.Clear();
+                            //continue;
 
                             //check if there's any other grids in our list to process
                             if ( item.YardGrids.Count < 1 )
@@ -49,6 +49,7 @@ namespace UtilityPlugin.ProcessHandlers
                                 continue;
                             }
 
+                            item.ProcessBlocks.Clear();
                             item.Grid = item.YardGrids[0];
                             item.YardGrids.RemoveAt( 0 );
                             //just in case this grid is also closed for some reason

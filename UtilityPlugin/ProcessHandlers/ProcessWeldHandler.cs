@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Sandbox.Game;
 using Sandbox.Game.Entities;
+using Sandbox.Game.Entities.Blocks;
 using Sandbox.Game.Entities.Cube;
 using Sandbox.Game.GameSystems;
 using Sandbox.Game.GameSystems.Conveyors;
@@ -26,14 +28,12 @@ namespace UtilityPlugin.ProcessHandlers
         {
             return 500;
         }
-        private static HashSet<long> stalledWelders = new HashSet<long>(); 
 
         public override void Handle()
         {
 
             lock ( ProcessShipyardHandler.ShipyardsList )
             {
-                UtilityPlugin.Log.Error( "1" );
                 foreach ( ShipyardItem item in ProcessShipyardHandler.ShipyardsList.Where( item => item.YardType == ShipyardItem.ShipyardType.Weld ) )
                 {
 
@@ -41,7 +41,6 @@ namespace UtilityPlugin.ProcessHandlers
                     {
                         if ( item.Grid?.Physics == null || item.Grid.Closed )
                         {
-                            UtilityPlugin.Log.Error("2");
                             item.Clear();
                             continue;
                             //check if there's any other grids in our list to process
@@ -57,8 +56,7 @@ namespace UtilityPlugin.ProcessHandlers
                             if ( item.Grid?.Physics == null || item.Grid.Closed )
                                 continue;
                         }
-
-                        UtilityPlugin.Log.Error("3");
+                        
                         //check if the target ship has left the shipyard
                         var testBox = MathUtility.CreateOrientedBoundingBox( item.Grid );
                         if ( testBox == null )
@@ -74,16 +72,14 @@ namespace UtilityPlugin.ProcessHandlers
                             item.Clear();
                             continue;
                         }
-
-                        UtilityPlugin.Log.Error("4");
+                        
                         if ( !StepWeld( item ) )
                         {
                             item.Clear();
                             continue;
                         }
                     }
-
-                    UtilityPlugin.Log.Error("5");
+                    
                     var allEntities = new HashSet<MyEntity>();
                     var grids = new HashSet<MyCubeGrid>();
 
@@ -91,8 +87,7 @@ namespace UtilityPlugin.ProcessHandlers
                     //this is just to find entities in the general area, we check later against the box
                     var entitySphere = new BoundingSphereD( item.ShipyardBox.Center,
                                                             item.ShipyardBox.HalfExtent.AbsMax() );
-
-                    UtilityPlugin.Log.Error("6");
+                    
                     Wrapper.GameAction( () => allEntities = MyEntities.GetEntities() );
 
                     foreach ( MyEntity entity in allEntities.Where( x => x is MyCubeGrid ) )
@@ -100,8 +95,7 @@ namespace UtilityPlugin.ProcessHandlers
                         if ( entitySphere.Contains( entity.PositionComp.GetPosition() ) == ContainmentType.Contains )
                             grids.Add( entity as MyCubeGrid );
                     }
-
-                    UtilityPlugin.Log.Error("7");
+                    
                     foreach ( MyCubeGrid grid in grids )
                     {
                         if ( grid?.Physics == null || grid.Closed )
@@ -117,8 +111,7 @@ namespace UtilityPlugin.ProcessHandlers
                             //item.HasGrid = false;
                             //break;
                         }
-
-                        UtilityPlugin.Log.Error("8");
+                        
                         MyOrientedBoundingBoxD? testBox = MathUtility.CreateOrientedBoundingBox( grid );
                         if ( !testBox.HasValue )
                             continue;
@@ -134,9 +127,7 @@ namespace UtilityPlugin.ProcessHandlers
                             else
                                 item.YardGrids.Add( grid );
                         }
-                        UtilityPlugin.Log.Error("9");
                     }
-                    UtilityPlugin.Log.Error("10");
                 }
             }
 
@@ -145,7 +136,8 @@ namespace UtilityPlugin.ProcessHandlers
 
         private static bool StepWeld( ShipyardItem shipyardItem )
         {
-            var missingComponents = new Dictionary<string, int>();
+         HashSet<long> stalledWelders = new HashSet<long>();
+        var missingComponents = new Dictionary<string, int>();
             var random = new Random();
             float weldAmount = Server.Instance.Config.WelderSpeedMultiplier * PluginSettings.Instance.WeldMultiplier;
             float boneAmount = weldAmount * .1f;
@@ -160,7 +152,86 @@ namespace UtilityPlugin.ProcessHandlers
 
             //if we have no blocks to weld, return false so we know we're done
             if ( weldBlocks.Count == 0 )
+            {
+                if ( shipyardItem.GridProjector == null )
+                {
+                    foreach ( var block in shipyardItem.Grid.GetFatBlocks() )
+                    {
+                        MyProjectorBase projector = block as MyProjectorBase;
+
+                        if ( projector?.Clipboard.PreviewGrids.Count > 0 )
+                        {
+                            /*
+                            bool canBuild = false;
+                            Wrapper.GameAction( () => canBuild = projector.Clipboard.PreviewGrids[0].CubeBlocks.All(x => projector.CanBuild(x, true) != MyProjectorBase.BuildCheckResult.OK));
+                            if ( !canBuild)
+                                continue;
+                            */
+                            shipyardItem.GridProjector = projector;
+                            break;
+                        }
+                    }
+                }
+            }
+            if ( weldBlocks.Count < 8 && shipyardItem.GridProjector?.Clipboard.PreviewGrids.Count > 0 )
+            {
+                int neededBlocks = 8 - weldBlocks.Count;
+                //shipyardItem.ProcessBlocks.Clear();
+                for ( int b = 0; b < neededBlocks; b++ )
+                {
+                    var welder = shipyardItem.Tools[b];
+                    var projector = shipyardItem.GridProjector;
+                    var projectedGrid = projector.Clipboard.PreviewGrids[0];
+                    MySlimBlock buildBlock = null;
+
+                    Wrapper.GameAction( () =>
+                    {
+                        //buildBlock = projectedGrid.CubeBlocks.First( x => projector.CanBuild( x, true ) == MyProjectorBase.BuildCheckResult.OK );
+                        foreach ( var block in projectedGrid.CubeBlocks )
+                        {
+                            if ( projector.CanBuild( block, true ) == MyProjectorBase.BuildCheckResult.OK )
+                            {
+                                buildBlock = block;
+                                break;
+                            }
+                        }
+                        if ( buildBlock == null )
+                        {
+                            return;
+                        }
+                        var welderInventory = (MyInventory)((IMyShipWelder)welder).GetInventory( 0 );
+                        var components = buildBlock.BlockDefinition.Components;
+                        if ( components == null || components.Length == 0 )
+                            return;
+                        var componentId = components[0].Definition.Id;
+                        MyGridConveyorSystem.ItemPullRequest( (IMyConveyorEndpointBlock)welder, welderInventory, welder.OwnerId, componentId, 1 );
+
+
+                        if ( welderInventory.ContainItems( 1, buildBlock.BlockDefinition.Components[0].Definition.Id ) )
+                        {
+                            projector.Build( buildBlock, welder.OwnerId, welder.EntityId );
+                        }
+                    } );
+                    /*
+                        Communication.MessageStruct message = new Communication.MessageStruct()
+                        {
+                            toolId=welder.EntityId,
+                            gridId=buildBlock.CubeGrid.EntityId,
+                            blockPos=buildBlock.Position,
+                            packedColor = Color.LightGreen.PackedValue,
+                            pulse=false
+                        };
+                        Communication.SendLine( message );
+                        */
+                    //if (buildBlock!=null)
+                    //weldBlocks.Add( buildBlock );
+                }
+            }
+            if ( shipyardItem.GridProjector?.Clipboard.PreviewGrids.Count == 0 )
+            {
+                shipyardItem.GridProjector = null;
                 return false;
+            }
 
             foreach ( IMyCubeBlock welder in shipyardItem.Tools )
             {
@@ -168,8 +239,7 @@ namespace UtilityPlugin.ProcessHandlers
                 {
                     MySlimBlock nextBlock = null;
                     var tryCount = 0;
-
-
+                    
                     while ( tryCount < 20 )
                     {
                         //limit the number of tries so we don't get stuck in a loop forever
@@ -242,7 +312,7 @@ namespace UtilityPlugin.ProcessHandlers
                         block.MoveItemsToConstructionStockpile( (MyInventory)welder.GetInventory( 0 ) );
                         block.IncreaseMountLevel( weldAmount, 0, null, boneAmount, true );
 
-                    if ( !block.CanContinueBuild( (MyInventory)welder.GetInventory( 0 ) ) )
+                    if ( !block.CanContinueBuild( (MyInventory)welder.GetInventory( 0 ) ) && !block.IsFullIntegrity )
                         stalledWelders.Add( welder.EntityId );
                 }
             } );

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Sandbox.Game.Entities;
+using Sandbox.Game.Entities.Blocks;
 using Sandbox.Game.Entities.Cube;
 using Sandbox.ModAPI;
 using Sandbox.ModAPI.Ingame;
@@ -48,18 +49,8 @@ namespace UtilityPlugin.ProcessHandlers
             Grid = null;
             ProcessBlocks.Clear( );
             YardGrids.Clear();
-            foreach ( var tool in Tools)
-            {
-                Communication.MessageStruct message = new Communication.MessageStruct()
-                {
-                    toolId=tool.EntityId,
-                    gridId=0,
-                    blockPos=new SerializableVector3I(0,0,0),
-                    packedColor=0,
-                    pulse=false
-                };
-                Communication.SendLine( message );
-            }
+            ClearLines();
+            GridProjector = null;
         }
 
         public bool Enabled;
@@ -69,6 +60,24 @@ namespace UtilityPlugin.ProcessHandlers
         //tool, target block
         public SortedList<long, MySlimBlock> ProcessBlocks = new SortedList<long, MySlimBlock>( );
         public List<MyCubeGrid> YardGrids = new List<MyCubeGrid>();
+        public MyProjectorBase GridProjector;
+        
+
+        public void ClearLines()
+        {
+            foreach (var tool in Tools)
+            {
+                Communication.MessageStruct message = new Communication.MessageStruct()
+                {
+                    toolId = tool.EntityId,
+                    gridId = 0,
+                    blockPos = new SerializableVector3I(0, 0, 0),
+                    packedColor = 0,
+                    pulse = false
+                };
+                Communication.SendLine(message);
+            }
+        }
     }
 
     public class ProcessShipyardHandler : ProcessHandlerBase
@@ -76,7 +85,7 @@ namespace UtilityPlugin.ProcessHandlers
         private static List<IMyCubeBlock> grinders = new List<IMyCubeBlock>( );
         private static List<IMyCubeBlock> welders = new List<IMyCubeBlock>( );
 
-        public static List<ShipyardItem> ShipyardsList = new List<ShipyardItem>();
+        public static HashSet<ShipyardItem> ShipyardsList = new HashSet<ShipyardItem>();
 
         public override int GetUpdateResolution( )
         {
@@ -103,111 +112,125 @@ namespace UtilityPlugin.ProcessHandlers
             //run through our current list of shipyards and make sure they're still valid
             lock ( ShipyardsList )
             {
-                for ( int i = ShipyardsList.Count - 1; i >= 0; --i )
+                HashSet<ShipyardItem> itemsToRemove = new HashSet<ShipyardItem>();
+                foreach(var item in ShipyardsList )
                 {
-                    ShipyardItem item = ShipyardsList[i];
 
                     if ( !AreToolsConnected( item.Tools ) )
                     {
                         UtilityPlugin.Log.Info( "remove item tools " + item.Tools.Count );
-                        ShipyardsList.Remove( item );
+                        item.Clear();
+                        itemsToRemove.Add( item );
                         continue;
                     }
                     if ( !entities.Contains( item.YardEntity ) )
                     {
                         UtilityPlugin.Log.Info( "remove item entity" );
-                        ShipyardsList.Remove( item );
+                        item.Clear();
+                        itemsToRemove.Add( item );
                         continue;
                     }
                     if ( !item.YardEntity.Physics.IsStatic )
                     {
                         UtilityPlugin.Log.Info( "remove item physics" );
-                        ShipyardsList.Remove( item );
+                        itemsToRemove.Add( item );
+                        item.Clear();
                         continue;
                     }
 
-                    //skipEntities.Add(item.YardEntity  );
+                    //skipEntities.Add( item.YardEntity );
                     //this should stop us recalculating a bounding box on an existing yard
                     //  entities.Remove(item.YardEntity);
                 }
-            }
-            foreach ( IMyEntity entity in entities )
-            {
-                if ( entity == null || entity.Closed )
-                    continue;
 
-                if ( skipEntities.Contains( entity ) )
-                    continue;
-
-                if ( entity.Physics == null || !entity.Physics.IsStatic )
-                    continue;
-
-                if ( !(entity is IMyCubeGrid) )
-                    continue;
-
-                List<IMySlimBlock> gridBlocks = new List<IMySlimBlock>( );
-                Wrapper.GameAction( ( ) =>
-                 {
-                     ((IMyCubeGrid)entity).GetBlocks( gridBlocks );
-                 } );
-
-                foreach ( IMySlimBlock slimBlock in gridBlocks )
+                foreach ( var item in itemsToRemove )
                 {
-                    if ( slimBlock == null )
+                    ShipyardsList.Remove( item );
+                }
+
+                foreach ( IMyEntity entity in entities )
+                {
+                    if ( entity == null || entity.Closed )
                         continue;
 
-                    if ( slimBlock.FatBlock == null )
+                    if ( skipEntities.Contains( entity ) )
                         continue;
 
-                    var fatBlock = slimBlock.FatBlock;
-                    //TODO: Probably better to check subtype of the custom block when we have it
-                    try
-                    {
-                        if ( fatBlock is IMyShipGrinder
-                        && ((IMyTerminalBlock)fatBlock).CustomName.ToLower( ).Contains( "shipyard" ) )
-                        {
-                            grinders.Add( fatBlock );
-                        }
+                    if ( entity.Physics == null || !entity.Physics.IsStatic )
+                        continue;
 
-                        else if ( fatBlock is IMyShipWelder
-                             && ((IMyTerminalBlock)fatBlock).CustomName.ToLower( ).Contains( "shipyard" ) )
+                    if ( !(entity is IMyCubeGrid) )
+                        continue;
+
+                    List<IMySlimBlock> gridBlocks = new List<IMySlimBlock>();
+                    Wrapper.GameAction( () =>
+                    {
+                        ((IMyCubeGrid)entity).GetBlocks( gridBlocks );
+                    } );
+
+                    foreach ( IMySlimBlock slimBlock in gridBlocks )
+                    {
+                        if ( slimBlock == null )
+                            continue;
+
+                        if ( slimBlock.FatBlock == null )
+                            continue;
+
+                        var fatBlock = slimBlock.FatBlock;
+                        //TODO: Probably better to check subtype of the custom block when we have it
+                        try
                         {
-                            welders.Add( fatBlock );
+                            if ( fatBlock is IMyShipGrinder
+                                 && ((IMyTerminalBlock)fatBlock).CustomName.ToLower().Contains( "shipyard" ) )
+                            {
+                                grinders.Add( fatBlock );
+                            }
+
+                            else if ( fatBlock is IMyShipWelder
+                                      && ((IMyTerminalBlock)fatBlock).CustomName.ToLower().Contains( "shipyard" ) )
+                            {
+                                welders.Add( fatBlock );
+                            }
+                        }
+                        catch ( Exception ex )
+                        {
+                            UtilityPlugin.Log.Error( ex );
                         }
                     }
-                    catch ( Exception ex )
+                    //make sure the shipyard blocks are all connected to the conveyor system
+                    if ( grinders.Count == 8 )
                     {
-                         UtilityPlugin.Log.Error(ex);
+                        if ( ShipyardsList.Any( x => x.YardEntity.EntityId == entity.EntityId && x.YardType==ShipyardItem.ShipyardType.Grind) )
+                            continue;
+
+                        MyOrientedBoundingBoxD? testBox = IsYardValid( entity, grinders );
+                        if ( testBox.HasValue )
+                        {
+                            ShipyardsList.Add( new ShipyardItem(
+                                                   testBox.Value,
+                                                   grinders.ToList(),
+                                                   ShipyardItem.ShipyardType.Grind,
+                                                   entity ) );
+                        }
                     }
-                }
-                //make sure the shipyard blocks are all connected to the conveyor system
-                if ( grinders.Count == 8 )
-                {
-                    MyOrientedBoundingBoxD? testBox = IsYardValid( entity, grinders );
-                    if ( testBox.HasValue )
+
+                    if ( welders.Count == 8 )
                     {
-                        ShipyardsList.Add( new ShipyardItem(
-                                               testBox.Value,
-                                               grinders.ToList(),
-                                               ShipyardItem.ShipyardType.Grind,
-                                               entity ) );
-                    }
-                }
-                
-                if ( welders.Count == 8 )
-                {
-                    MyOrientedBoundingBoxD? testBox = IsYardValid( entity, welders );
-                    if ( testBox.HasValue )
-                    {
-                        ShipyardsList.Add( new ShipyardItem(
-                                               testBox.Value,
-                                               welders.ToList(),
-                                               ShipyardItem.ShipyardType.Weld,
-                                               entity ) );
+                        if (ShipyardsList.Any(x => x.YardEntity.EntityId == entity.EntityId && x.YardType == ShipyardItem.ShipyardType.Weld))
+                            continue;
+
+                        MyOrientedBoundingBoxD? testBox = IsYardValid( entity, welders );
+                        if ( testBox.HasValue )
+                        {
+                            ShipyardsList.Add( new ShipyardItem(
+                                                   testBox.Value,
+                                                   welders.ToList(),
+                                                   ShipyardItem.ShipyardType.Weld,
+                                                   entity ) );
+                        }
                     }
                 }
             }
-
             base.Handle( );
         }
 
