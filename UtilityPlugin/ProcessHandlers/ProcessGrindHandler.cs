@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Sandbox.Game;
 using Sandbox.Game.Entities;
 using Sandbox.Game.Entities.Cube;
@@ -20,8 +21,7 @@ namespace UtilityPlugin.ProcessHandlers
 {
     public class ProcessGrindHandler : ProcessHandlerBase
     {
-        private static DisconnectHelper disconnect = new DisconnectHelper();
-
+        public static DisconnectHelper disconnect = new DisconnectHelper();
         public override int GetUpdateResolution()
         {
             return 500;
@@ -142,6 +142,7 @@ namespace UtilityPlugin.ProcessHandlers
             HashSet<long> grindersToRemove = new HashSet<long>();
             //shorten this to grid for convenience
             MyCubeGrid grid = shipyardItem.Grid;
+            List<Task> blockTasks = new List<Task>();
 
             if ( grid?.Physics == null || grid.Closed )
                 return;
@@ -152,65 +153,74 @@ namespace UtilityPlugin.ProcessHandlers
             //do a raycast to see if the grinder can see the block we're assigning to it
             foreach ( IMyCubeBlock listGrinder in shipyardItem.Tools )
             {
-                MySlimBlock nextBlock;
-                if ( !shipyardItem.ProcessBlocks.TryGetValue( listGrinder.EntityId, out nextBlock ) )
+                blockTasks.Add( Task.Run( () =>
                 {
-                    var tryCount = 0;
-
-                    //TODO: optimize the try count instead of picking an arbitrary value
-                    //what the hell does that mean?
-                    while ( tryCount < 30 )
+                    DisconnectHelper localDisconnect = new DisconnectHelper();
+                    MySlimBlock nextBlock;
+                    if ( !shipyardItem.ProcessBlocks.TryGetValue( listGrinder.EntityId, out nextBlock ) )
                     {
-                        if ( grid?.Physics == null )
-                            return;
+                        var tryCount = 0;
 
-                        if ( grid.Physics.LinearVelocity != Vector3D.Zero || grid.Physics.AngularVelocity != Vector3D.Zero )
-                            grid.Stop();
-
-                        //limit the number of tries so we don't get stuck in a loop forever
-                        tryCount++;
-
-                        //pick a random block. we don't really care if two grinders hit the same block, so don't check
-                        if ( grid.BlocksCount > 30 )
-                            nextBlock = grid.CubeBlocks.ElementAt( random.Next( 0, grid.BlocksCount - 1 ) );
-
-                        //if we have less than 30 blocks total, just iterate through them, it's faster than going at random
-                        else
-                            nextBlock = grid.CubeBlocks.ElementAt( Math.Min( tryCount, grid.BlocksCount - 1 ) );
-                        if ( nextBlock == null )
-                            continue;
-
-                        if ( shipyardItem.ProcessBlocks.ContainsValue( nextBlock ) )
-                            continue;
-
-                        //this raycast should give us the grid location of the first block it hits 
-                        //we don't really care if it hits our random block, just grab whatever the grinder sees first
-                        Vector3I? blockResult = grid.RayCastBlocks( listGrinder.GetPosition(),
-                                                                    grid.GridIntegerToWorld( nextBlock.Position ) );
-                        if ( !blockResult.HasValue )
-                            continue;
-                        
-                        //TODO: remove this when my PR is merged
-                        //check if removing this block will split the grid
-                        if ( disconnect.TryDisconnect(grid.GetCubeBlock(blockResult.Value)) )
+                        //TODO: optimize the try count instead of picking an arbitrary value
+                        //what the hell does that mean?
+                        while ( tryCount < 30 )
                         {
-                            //UtilityPlugin.Log.Info( "detected split" );
-                            continue;
+                            if ( grid.Physics.LinearVelocity != Vector3D.Zero || grid.Physics.AngularVelocity != Vector3D.Zero )
+                                grid.Stop();
+
+                            //limit the number of tries so we don't get stuck in a loop forever
+                            tryCount++;
+
+                            //pick a random block. we don't really care if two grinders hit the same block, so don't check
+                            if ( grid.BlocksCount > 30 )
+                                nextBlock = grid.CubeBlocks.ElementAt( random.Next( 0, grid.BlocksCount - 1 ) );
+
+                            //if we have less than 30 blocks total, just iterate through them, it's faster than going at random
+                            else
+                                nextBlock = grid.CubeBlocks.ElementAt( Math.Min( tryCount, grid.BlocksCount - 1 ) );
+                            if ( nextBlock == null )
+                                continue;
+
+                            if ( shipyardItem.ProcessBlocks.ContainsValue( nextBlock ) )
+                                continue;
+
+                            //this raycast should give us the grid location of the first block it hits 
+                            //we don't really care if it hits our random block, just grab whatever the grinder sees first
+                            Vector3I? blockResult = grid.RayCastBlocks( listGrinder.GetPosition(),
+                                                                        grid.GridIntegerToWorld( nextBlock.Position ) );
+                            if ( !blockResult.HasValue )
+                                continue;
+
+                            //TODO: remove this when my PR is merged
+                            //check if removing this block will split the grid
+                            if ( localDisconnect.TryDisconnect( grid.GetCubeBlock( blockResult.Value ) ) )
+                            {
+                                //UtilityPlugin.Log.Info( "detected split" );
+                                continue;
+                            }
+
+                            nextBlock = grid.GetCubeBlock( blockResult.Value );
+
+                            break;
                         }
 
-                        nextBlock = grid.GetCubeBlock( blockResult.Value );
-                        
-                        break;
+                        //we weren't able to find a suitable block somehow, so skip this grinder for now
+                        if ( nextBlock == null )
+                            return;
+
+                        //we found a block to pair with our grinder, add it to the dictionary and carry on with destruction
+                        lock ( shipyardItem.ProcessBlocks )
+                        {
+                            shipyardItem.ProcessBlocks.Add( listGrinder.EntityId, nextBlock );
+                        }
                     }
-
-                    //we weren't able to find a suitable block somehow, so skip this grinder for now
-                    if ( nextBlock == null )
-                        continue;
-
-                    //we found a block to pair with our grinder, add it to the dictionary and carry on with destruction
-                    shipyardItem.ProcessBlocks.Add( listGrinder.EntityId, nextBlock );
+                } ) );
+                if ( blockTasks.Count >= 2 )
+                {
                 }
             }
+                    Task.WaitAll( blockTasks.ToArray() );
+                    blockTasks.Clear();
             var tmpItemList = new List<MyPhysicalInventoryItem>();
 
             foreach ( IMyCubeBlock grinderBlock in shipyardItem.Tools )

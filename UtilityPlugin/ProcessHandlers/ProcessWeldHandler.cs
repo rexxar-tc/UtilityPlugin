@@ -13,6 +13,7 @@ using Sandbox.ModAPI.Ingame;
 using SEModAPIExtensions.API;
 using UtilityPlugin.Utility;
 using VRage;
+using VRage.Collections;
 using VRage.Game;
 using VRage.Game.Entity;
 using VRage.Game.ModAPI;
@@ -343,7 +344,7 @@ namespace UtilityPlugin.ProcessHandlers
                 }
                 else
                 {
-                    message.packedColor = Color.Aquamarine.PackedValue;
+                    message.packedColor = Color.DarkCyan.PackedValue;
                     message.pulse = false;
                 }
 

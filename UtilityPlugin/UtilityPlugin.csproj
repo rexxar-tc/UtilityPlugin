@@ -70,6 +70,7 @@
       <DependentUpon>AssemblyFileVersion.tt</DependentUpon>
     </Compile>
     <Compile Include="ChatHandlers\ChatHandlerBase.cs" />
+    <Compile Include="LCDMenu.cs" />
     <Compile Include="ProcessHandlers\ProcessShipyardHandler.cs" />
     <Compile Include="ProcessHandlers\ProcessGrindHandler.cs" />
     <Compile Include="ProcessHandlers\ProcessWeldHandler.cs" />
@@ -110,6 +111,7 @@
     <Reference Include="SEModAPIInternal">
       <HintPath>..\..\SEServerExtender\SEServerExtender\bin\x64\Debug\SEModAPIInternal.dll</HintPath>
     </Reference>
+    <Reference Include="SpaceEngineers.Game, Version=1.0.0.0, Culture=neutral, processorArchitecture=AMD64" />
     <Reference Include="SpaceEngineers.ObjectBuilders">
       <HintPath>..\..\SEServerExtender\GameLibraries\SpaceEngineers.ObjectBuilders.dll</HintPath>
     </Reference>
@@ -133,8 +135,9 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\..\SEServerExtender\GameLibraries\VRage.Game.XmlSerializers.dll</HintPath>
     </Reference>
-    <Reference Include="VRage.Library">
-      <HintPath>..\Libraries\VRage.Library.dll</HintPath>
+    <Reference Include="VRage.Library, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\SEServerExtender\GameLibraries\VRage.Library.dll</HintPath>
     </Reference>
     <Reference Include="VRage.Math">
       <HintPath>..\Libraries\VRage.Math.dll</HintPath>
